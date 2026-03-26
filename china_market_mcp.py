@@ -45,6 +45,44 @@ def bayesian_update(prior: dict, sentiment: str) -> dict:
         posterior[state] = round(posterior[state] / total, 3)
     return posterior
 
+def calculate_confidence_interval(probability: float, history: list) -> dict:
+    """
+    计算情绪概率的95%置信区间
+    公式：均值 ± 1.96 × 标准差
+    
+    参数：
+    - probability: 当前贝叶斯概率
+    - history: 历史概率记录列表
+    """
+    import statistics
+    
+    if len(history) < 2:
+        return {
+            "mean": probability,
+            "lower": max(0, probability - 0.1),
+            "upper": min(1, probability + 0.1),
+            "note": "历史数据不足，使用默认区间±10%"
+        }
+    
+    # 提取历史看多概率
+    historical_probs = [h["posterior"]["bullish"] for h in history]
+    
+    mean = statistics.mean(historical_probs)
+    std_dev = statistics.stdev(historical_probs)
+    
+    # 95%置信区间
+    margin = 1.96 * std_dev
+    lower = max(0, mean - margin)
+    upper = min(1, mean + margin)
+    
+    return {
+        "mean": round(mean, 3),
+        "std_dev": round(std_dev, 3),
+        "lower": round(lower, 3),
+        "upper": round(upper, 3),
+        "note": f"基于{len(historical_probs)}个交易日数据"
+    }
+
 def calculate_sharpe(returns: list, risk_free_rate: float = 0.02) -> dict:
     """
     计算夏普比率
@@ -181,6 +219,31 @@ def get_pe_analysis(symbol: str = "BABA") -> str:
 52周最高：${data.get('52WeekHigh', 'N/A')}
 52周最低：${data.get('52WeekLow', 'N/A')}
 Beta系数：{data.get('beta', 'N/A')}
+"""
+
+@app.tool()
+def get_sentiment_confidence() -> str:
+    """
+    获取市场情绪的95%置信区间
+    基于历史贝叶斯数据计算正态分布置信区间
+    """
+    history = load_history()
+    current_prob = history["bullish"]
+    historical_records = history.get("history", [])
+    
+    ci = calculate_confidence_interval(current_prob, historical_records)
+    
+    return f"""
+市场情绪置信区间分析：
+
+当前看多概率：{current_prob*100:.1f}%
+95%置信区间：[{ci['lower']*100:.1f}%, {ci['upper']*100:.1f}%]
+
+解读：
+我们有95%的把握认为，市场真实看多概率在{ci['lower']*100:.1f}%到{ci['upper']*100:.1f}%之间。
+
+{ci['note']}
+标准差：{ci.get('std_dev', 'N/A')}
 """
 
 @app.tool()
