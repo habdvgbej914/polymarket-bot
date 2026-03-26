@@ -134,6 +134,56 @@ def get_sharpe_ratio(symbol: str = "BABA") -> str:
 """
 
 @app.tool()
+def get_pe_analysis(symbol: str = "BABA") -> str:
+    """
+    获取股票市盈率(PE)及估值分析
+    symbol参数：股票代码，例如BABA、BIDU、JD
+    """
+    # 获取财务指标
+    url = f"https://finnhub.io/api/v1/stock/metric?symbol={symbol}&metric=all&token={FINNHUB_KEY}"
+    response = requests.get(url)
+    data = response.json().get("metric", {})
+    
+    # 获取当前价格
+    quote_url = f"https://finnhub.io/api/v1/quote?symbol={symbol}&token={FINNHUB_KEY}"
+    quote = requests.get(quote_url).json()
+    
+    current_price = quote.get("c", 0)
+    eps_annual = data.get("epsAnnual", 0)
+    eps_ttm = data.get("epsInclExtraItemsTTM", 0)
+    pe_ttm = current_price / eps_ttm if eps_ttm > 0 else None
+    pe_annual = current_price / eps_annual if eps_annual > 0 else None
+    
+    # PE估值判断
+    def pe_interpretation(pe):
+        if pe is None:
+            return "无法计算"
+        elif pe < 10:
+            return "低估（<10倍）"
+        elif pe < 20:
+            return "合理（10-20倍）"
+        elif pe < 30:
+            return "偏高（20-30倍）"
+        else:
+            return "高估（>30倍）"
+    
+    return f"""
+{symbol} 市盈率(PE)分析：
+当前价格：${current_price}
+每股收益(EPS年度)：${eps_annual}
+每股收益(EPS TTM)：${eps_ttm}
+
+市盈率(年度PE)：{round(pe_annual, 2) if pe_annual else 'N/A'}倍
+市盈率(TTM PE)：{round(pe_ttm, 2) if pe_ttm else 'N/A'}倍
+
+估值判断：{pe_interpretation(pe_ttm)}
+
+52周最高：${data.get('52WeekHigh', 'N/A')}
+52周最低：${data.get('52WeekLow', 'N/A')}
+Beta系数：{data.get('beta', 'N/A')}
+"""
+
+@app.tool()
 def update_market_sentiment(sentiment: str) -> str:
     """用贝叶斯公式更新市场情绪概率，sentiment参数：bullish/bearish/neutral"""
     history = load_history()
