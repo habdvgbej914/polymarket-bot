@@ -46,16 +46,7 @@ def bayesian_update(prior: dict, sentiment: str) -> dict:
     return posterior
 
 def calculate_confidence_interval(probability: float, history: list) -> dict:
-    """
-    计算情绪概率的95%置信区间
-    公式：均值 ± 1.96 × 标准差
-    
-    参数：
-    - probability: 当前贝叶斯概率
-    - history: 历史概率记录列表
-    """
     import statistics
-    
     if len(history) < 2:
         return {
             "mean": probability,
@@ -63,18 +54,12 @@ def calculate_confidence_interval(probability: float, history: list) -> dict:
             "upper": min(1, probability + 0.1),
             "note": "历史数据不足，使用默认区间±10%"
         }
-    
-    # 提取历史看多概率
     historical_probs = [h["posterior"]["bullish"] for h in history]
-    
     mean = statistics.mean(historical_probs)
     std_dev = statistics.stdev(historical_probs)
-    
-    # 95%置信区间
     margin = 1.96 * std_dev
     lower = max(0, mean - margin)
     upper = min(1, mean + margin)
-    
     return {
         "mean": round(mean, 3),
         "std_dev": round(std_dev, 3),
@@ -84,34 +69,15 @@ def calculate_confidence_interval(probability: float, history: list) -> dict:
     }
 
 def calculate_sharpe(returns: list, risk_free_rate: float = 0.02) -> dict:
-    """
-    计算夏普比率
-    公式：(平均收益率 - 无风险利率) / 收益率标准差
-    
-    参数：
-    - returns: 每日收益率列表（例如 [0.01, -0.02, 0.03]）
-    - risk_free_rate: 年化无风险利率，默认2%（中国国债利率参考）
-    """
     if len(returns) < 2:
         return {"error": "数据不足，至少需要2个交易日数据"}
-    
     import statistics
-    
-    # 日均收益率
     avg_return = sum(returns) / len(returns)
-    
-    # 收益率标准差（风险）
     std_dev = statistics.stdev(returns)
-    
     if std_dev == 0:
         return {"error": "标准差为零，无法计算"}
-    
-    # 转换为日化无风险利率
     daily_risk_free = risk_free_rate / 252
-    
-    # 夏普比率（年化）
     sharpe = (avg_return - daily_risk_free) / std_dev * (252 ** 0.5)
-    
     return {
         "sharpe_ratio": round(sharpe, 3),
         "avg_daily_return": round(avg_return * 100, 3),
@@ -143,56 +109,38 @@ def get_china_news() -> str:
 
 @app.tool()
 def get_sharpe_ratio(symbol: str = "BABA") -> str:
-    """
-    计算指定股票的夏普比率
-    目前使用模拟数据，回国后接入AKShare替换真实数据
-    symbol参数：股票代码，例如BABA、BIDU、JD
-    """
-    # 占位数据，回国后替换为AKShare真实历史价格
-    mock_returns = [0.01, -0.02, 0.03, -0.01, 0.02, 
+    """计算指定股票的夏普比率，目前使用模拟数据"""
+    mock_returns = [0.01, -0.02, 0.03, -0.01, 0.02,
                     0.015, -0.005, 0.02, -0.03, 0.01,
                     0.008, -0.012, 0.025, -0.008, 0.018,
                     0.003, -0.015, 0.022, -0.006, 0.011,
                     0.009, -0.018, 0.014, -0.004, 0.019,
                     0.007, -0.009, 0.016, -0.011, 0.013]
-    
     result = calculate_sharpe(mock_returns)
-    
     if "error" in result:
         return result["error"]
-    
     return f"""
 {symbol} 夏普比率分析：
 夏普比率：{result['sharpe_ratio']}
 日均收益率：{result['avg_daily_return']}%
 收益波动率（标准差）：{result['std_dev']}%
 评级：{result['interpretation']}
-
 注：当前使用模拟数据，回国后接入AKShare真实数据
 """
 
 @app.tool()
 def get_pe_analysis(symbol: str = "BABA") -> str:
-    """
-    获取股票市盈率(PE)及估值分析
-    symbol参数：股票代码，例如BABA、BIDU、JD
-    """
-    # 获取财务指标
+    """获取股票市盈率及估值分析"""
     url = f"https://finnhub.io/api/v1/stock/metric?symbol={symbol}&metric=all&token={FINNHUB_KEY}"
     response = requests.get(url)
     data = response.json().get("metric", {})
-    
-    # 获取当前价格
     quote_url = f"https://finnhub.io/api/v1/quote?symbol={symbol}&token={FINNHUB_KEY}"
     quote = requests.get(quote_url).json()
-    
     current_price = quote.get("c", 0)
     eps_annual = data.get("epsAnnual", 0)
     eps_ttm = data.get("epsInclExtraItemsTTM", 0)
     pe_ttm = current_price / eps_ttm if eps_ttm > 0 else None
     pe_annual = current_price / eps_annual if eps_annual > 0 else None
-    
-    # PE估值判断
     def pe_interpretation(pe):
         if pe is None:
             return "无法计算"
@@ -204,18 +152,14 @@ def get_pe_analysis(symbol: str = "BABA") -> str:
             return "偏高（20-30倍）"
         else:
             return "高估（>30倍）"
-    
     return f"""
 {symbol} 市盈率(PE)分析：
 当前价格：${current_price}
 每股收益(EPS年度)：${eps_annual}
 每股收益(EPS TTM)：${eps_ttm}
-
 市盈率(年度PE)：{round(pe_annual, 2) if pe_annual else 'N/A'}倍
 市盈率(TTM PE)：{round(pe_ttm, 2) if pe_ttm else 'N/A'}倍
-
 估值判断：{pe_interpretation(pe_ttm)}
-
 52周最高：${data.get('52WeekHigh', 'N/A')}
 52周最低：${data.get('52WeekLow', 'N/A')}
 Beta系数：{data.get('beta', 'N/A')}
@@ -223,27 +167,58 @@ Beta系数：{data.get('beta', 'N/A')}
 
 @app.tool()
 def get_sentiment_confidence() -> str:
-    """
-    获取市场情绪的95%置信区间
-    基于历史贝叶斯数据计算正态分布置信区间
-    """
+    """获取市场情绪的95%置信区间"""
     history = load_history()
     current_prob = history["bullish"]
     historical_records = history.get("history", [])
-    
     ci = calculate_confidence_interval(current_prob, historical_records)
-    
     return f"""
 市场情绪置信区间分析：
-
 当前看多概率：{current_prob*100:.1f}%
 95%置信区间：[{ci['lower']*100:.1f}%, {ci['upper']*100:.1f}%]
-
-解读：
-我们有95%的把握认为，市场真实看多概率在{ci['lower']*100:.1f}%到{ci['upper']*100:.1f}%之间。
-
+解读：我们有95%的把握认为，市场真实看多概率在{ci['lower']*100:.1f}%到{ci['upper']*100:.1f}%之间。
 {ci['note']}
 标准差：{ci.get('std_dev', 'N/A')}
+"""
+
+@app.tool()
+def get_personalized_analysis() -> str:
+    """基于用户画像的个性化投资分析"""
+    user_profile = {
+        "资金量": "1000英镑",
+        "经验": "有实操经验，短线亏损后转向长期",
+        "风险偏好": "保本优先，止损设3-5%",
+        "目标": "长期增值+学习",
+        "周期": "1-3年",
+        "市场": "美股为主，关注A股和加密货币"
+    }
+    history = load_history()
+    bullish_prob = history["bullish"]
+    if bullish_prob > 0.6:
+        action = "市场情绪偏多，符合长期建仓条件"
+        suggestion = "可以考虑小仓位（不超过总资金20%）分批建仓"
+    elif bullish_prob < 0.4:
+        action = "市场情绪偏空，保本优先"
+        suggestion = "建议观望，保持现金仓位"
+    else:
+        action = "市场情绪中性，等待更明确信号"
+        suggestion = "继续观察，不急于操作"
+    return f"""
+🎩 个性化投资分析（高级定制版）
+客户画像：
+  资金量：{user_profile['资金量']}
+  风险偏好：{user_profile['风险偏好']}
+  投资目标：{user_profile['目标']}
+  投资周期：{user_profile['周期']}
+当前市场信号：
+  看多概率：{bullish_prob*100:.1f}%
+  市场判断：{action}
+个性化建议：
+  {suggestion}
+定制说明：
+  基于您保本优先的偏好，任何操作止损设在3-5%
+  基于您1-3年周期，关注基本面而非短期波动
+  基于您1000英镑资金量，单笔投入不超过200英镑
 """
 
 @app.tool()
