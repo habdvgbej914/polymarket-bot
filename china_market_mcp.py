@@ -45,6 +45,42 @@ def bayesian_update(prior: dict, sentiment: str) -> dict:
         posterior[state] = round(posterior[state] / total, 3)
     return posterior
 
+def calculate_sharpe(returns: list, risk_free_rate: float = 0.02) -> dict:
+    """
+    计算夏普比率
+    公式：(平均收益率 - 无风险利率) / 收益率标准差
+    
+    参数：
+    - returns: 每日收益率列表（例如 [0.01, -0.02, 0.03]）
+    - risk_free_rate: 年化无风险利率，默认2%（中国国债利率参考）
+    """
+    if len(returns) < 2:
+        return {"error": "数据不足，至少需要2个交易日数据"}
+    
+    import statistics
+    
+    # 日均收益率
+    avg_return = sum(returns) / len(returns)
+    
+    # 收益率标准差（风险）
+    std_dev = statistics.stdev(returns)
+    
+    if std_dev == 0:
+        return {"error": "标准差为零，无法计算"}
+    
+    # 转换为日化无风险利率
+    daily_risk_free = risk_free_rate / 252
+    
+    # 夏普比率（年化）
+    sharpe = (avg_return - daily_risk_free) / std_dev * (252 ** 0.5)
+    
+    return {
+        "sharpe_ratio": round(sharpe, 3),
+        "avg_daily_return": round(avg_return * 100, 3),
+        "std_dev": round(std_dev * 100, 3),
+        "interpretation": "优秀" if sharpe > 1 else "良好" if sharpe > 0.5 else "较差"
+    }
+
 @app.tool()
 def get_china_news() -> str:
     """从Finnhub抓取中国市场相关财经新闻"""
@@ -66,6 +102,36 @@ def get_china_news() -> str:
     for i, n in enumerate(filtered[:10]):
         result += f"{i+1}. {n['headline']}\n{n['summary']}\n\n"
     return result
+
+@app.tool()
+def get_sharpe_ratio(symbol: str = "BABA") -> str:
+    """
+    计算指定股票的夏普比率
+    目前使用模拟数据，回国后接入AKShare替换真实数据
+    symbol参数：股票代码，例如BABA、BIDU、JD
+    """
+    # 占位数据，回国后替换为AKShare真实历史价格
+    mock_returns = [0.01, -0.02, 0.03, -0.01, 0.02, 
+                    0.015, -0.005, 0.02, -0.03, 0.01,
+                    0.008, -0.012, 0.025, -0.008, 0.018,
+                    0.003, -0.015, 0.022, -0.006, 0.011,
+                    0.009, -0.018, 0.014, -0.004, 0.019,
+                    0.007, -0.009, 0.016, -0.011, 0.013]
+    
+    result = calculate_sharpe(mock_returns)
+    
+    if "error" in result:
+        return result["error"]
+    
+    return f"""
+{symbol} 夏普比率分析：
+夏普比率：{result['sharpe_ratio']}
+日均收益率：{result['avg_daily_return']}%
+收益波动率（标准差）：{result['std_dev']}%
+评级：{result['interpretation']}
+
+注：当前使用模拟数据，回国后接入AKShare真实数据
+"""
 
 @app.tool()
 def update_market_sentiment(sentiment: str) -> str:
