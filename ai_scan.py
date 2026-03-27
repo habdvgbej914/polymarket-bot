@@ -10,7 +10,7 @@ client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 
 def get_markets(limit=20):
     """获取活跃市场"""
-    url = f"https://gamma-api.polymarket.com/markets?active=true&closed=false&limit={limit}&order=volume&ascending=false"
+    url = f"https://gamma-api.polymarket.com/markets?active=true&closed=false&limit={limit}&order=volume&ascending=false&tag=finance"
     response = requests.get(url)
     markets = response.json()
     
@@ -27,12 +27,16 @@ def get_markets(limit=20):
             no_price = float(prices[1])
             if yes_price == 0 and no_price == 0:
                 continue
+            
+            
+            
             result.append({
                 'question': market.get('question'),
                 'yes': yes_price,
                 'no': no_price,
                 'total': round(yes_price + no_price, 4)
             })
+
         except:
             continue
     return result
@@ -45,21 +49,18 @@ def find_arb_with_ai(markets):
     for i, m in enumerate(markets):
         market_list += f"{i+1}. {m['question']} (YES=${m['yes']}, NO=${m['no']})\n"
     
-    prompt = f"""你是一个预测市场套利分析师。
+    prompt = f"""你是一个预测市场套利分析师，专门寻找定价错误。
 
-以下是 Polymarket 上的活跃市场列表：
-
+以下是Polymarket上的活跃市场：
 {market_list}
 
-请找出哪些市场之间存在逻辑关联，并判断它们的价格是否矛盾。
+只关注以下两类机会：
 
-例如：
-- 如果市场A的结果会直接影响市场B的结果
-- 但两个市场的价格不一致
-- 这就是套利机会
+1. 互补市场：两个市场的YES价格加起来不等于1（比如市场A YES=0.6，市场B YES=0.5，加起来1.1，说明定价有误）
 
-请列出你发现的逻辑关联和价格矛盾，格式如下：
-市场X 和 市场Y 相关，原因：[解释]，价格矛盾：[是/否]，套利建议：[具体操作]"""
+2. 逻辑矛盾：如果A发生则B必然发生，但B的价格远低于A
+
+只列出真实的套利机会，没有就直接说没有，不要分析不相关的市场。"""
 
     print("🤖 正在用 AI 分析市场关联...\n")
     
