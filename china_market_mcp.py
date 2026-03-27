@@ -45,6 +45,97 @@ def bayesian_update(prior: dict, sentiment: str) -> dict:
         posterior[state] = round(posterior[state] / total, 3)
     return posterior
 
+def get_market_factors(symbol: str = "BABA") -> dict:
+    """
+    获取多因子数据
+    返回各因子的信号强度：1=看多, -1=看空, 0=中性
+    """
+    factors = {}
+    
+    url = f"https://finnhub.io/api/v1/stock/metric?symbol={symbol}&metric=all&token={FINNHUB_KEY}"
+    data = requests.get(url).json().get("metric", {})
+    
+    quote_url = f"https://finnhub.io/api/v1/quote?symbol={symbol}&token={FINNHUB_KEY}"
+    quote = requests.get(quote_url).json()
+    
+    # 因子1：成交量异常（10日均量 vs 3月均量）
+    vol_10d = data.get("10DayAverageTradingVolume", 0)
+    vol_3m = data.get("3MonthAverageTradingVolume", 0)
+    if vol_3m > 0:
+        vol_ratio = vol_10d / vol_3m
+        if vol_ratio > 1.2:
+            factors["volume"] = {"signal": 1, "value": round(vol_ratio, 2), "note": "成交量放大，看多"}
+        elif vol_ratio < 0.8:
+            factors["volume"] = {"signal": -1, "value": round(vol_ratio, 2), "note": "成交量萎缩，看空"}
+        else:
+            factors["volume"] = {"signal": 0, "value": round(vol_ratio, 2), "note": "成交量正常"}
+    
+    # 因子2：波动率（Beta）
+    beta = data.get("beta", 1)
+    if beta > 1.5:
+        factors["volatility"] = {"signal": -1, "value": beta, "note": "高波动，风险偏高"}
+    elif beta < 0.5:
+        factors["volatility"] = {"signal": 1, "value": beta, "note": "低波动，相对稳定"}
+    else:
+        factors["volatility"] = {"signal": 0, "value": beta, "note": "波动正常"}
+    
+    # 因子3：价格动量（当日涨跌幅）
+    change_pct = quote.get("dp", 0)
+    if change_pct > 2:
+        factors["momentum"] = {"signal": 1, "value": change_pct, "note": f"今日涨{change_pct:.1f}%，动量偏强"}
+    elif change_pct < -2:
+        factors["momentum"] = {"signal": -1, "value": change_pct, "note": f"今日跌{abs(change_pct):.1f}%，动量偏弱"}
+    else:
+        factors["momentum"] = {"signal": 0, "value": change_pct, "note": f"今日涨跌{change_pct:.1f}%，动量中性"}
+    
+    # 因子4：资金流向（占位，回国后接AKShare）
+    factors["fund_flow"] = {"signal": 0, "value": None, "note": "待接入真实数据"}
+    
+    return factors
+
+def multi_factor_bayesian(prior: dict, news_sentiment: str, symbol: str = "BABA") -> dict:
+    """
+    多因子贝叶斯更新
+    权重：新闻情绪40% + 成交量25% + 波动率10% + 动量25%
+    """
+    weights = {
+        "news": 0.40,
+        "volume": 0.25,
+        "momentum": 0.25,
+        "volatility": 0.10
+    }
+    
+    factors = get_market_factors(symbol)
+    
+    # 新闻情绪映射
+    news_signal = 1 if news_sentiment == "bullish" else -1 if news_sentiment == "bearish" else 0
+    
+    # 计算加权综合信号
+    weighted_signal = (
+        news_signal * weights["news"] +
+        factors.get("volume", {}).get("signal", 0) * weights["volume"] +
+        factors.get("momentum", {}).get("signal", 0) * weights["momentum"] +
+        factors.get("volatility", {}).get("signal", 0) * weights["volatility"]
+    )
+    
+    # 把综合信号转回sentiment
+    if weighted_signal > 0.1:
+        combined_sentiment = "bullish"
+    elif weighted_signal < -0.1:
+        combined_sentiment = "bearish"
+    else:
+        combined_sentiment = "neutral"
+    
+    # 用综合情绪做贝叶斯更新
+    posterior = bayesian_update(prior, combined_sentiment)
+    
+    return {
+        "posterior": posterior,
+        "weighted_signal": round(weighted_signal, 3),
+        "factors": factors,
+        "combined_sentiment": combined_sentiment
+    }
+
 def calculate_confidence_interval(probability: float, history: list) -> dict:
     import statistics
     if len(history) < 2:
@@ -219,6 +310,54 @@ def get_personalized_analysis() -> str:
   基于您保本优先的偏好，任何操作止损设在3-5%
   基于您1-3年周期，关注基本面而非短期波动
   基于您1000英镑资金量，单笔投入不超过200英镑
+"""
+@app.tool()
+def multi_factor_analysis(sentiment: str = "bullish", symbol: str = "BABA") -> str:
+    """
+    多因子贝叶斯市场分析
+    结合新闻情绪、成交量、波动率、价格动量四个因子
+    sentiment参数：bullish/bearish/neutral
+    symbol参数：股票代码，例如BABA、BIDU、JD
+    """
+    history = load_history()
+    prior = {
+        "bullish": history["bullish"],
+        "bearish": history["bearish"],
+        "neutral": history["neutral"]
+    }
+    
+    result = multi_factor_bayesian(prior, sentiment, symbol)
+    factors = result["factors"]
+    posterior = result["posterior"]
+    
+    # 更新历史记录
+    history["bullish"] = posterior["bullish"]
+    history["bearish"] = posterior["bearish"]
+    history["neutral"] = posterior["neutral"]
+    history["history"].append({
+        "date": datetime.now().strftime("%Y-%m-%d"),
+        "sentiment": result["combined_sentiment"],
+        "posterior": posterior,
+        "factors": {k: v.get("signal") for k, v in factors.items()}
+    })
+    save_history(history)
+    
+    return f"""
+📊 多因子贝叶斯分析（{symbol}）
+
+因子信号：
+  新闻情绪：{sentiment} → 信号: {1 if sentiment=='bullish' else -1 if sentiment=='bearish' else 0}（权重40%）
+  成交量：{factors['volume']['note']} → 信号: {factors['volume']['signal']}（权重25%）
+  价格动量：{factors['momentum']['note']} → 信号: {factors['momentum']['signal']}（权重25%）
+  波动率：{factors['volatility']['note']} → 信号: {factors['volatility']['signal']}（权重10%）
+  资金流向：{factors['fund_flow']['note']}（权重0%，待接入）
+
+综合信号：{result['weighted_signal']} → {result['combined_sentiment']}
+
+贝叶斯更新后：
+  看多：{posterior['bullish']*100:.1f}%
+  看空：{posterior['bearish']*100:.1f}%
+  中性：{posterior['neutral']*100:.1f}%
 """
 
 @app.tool()
