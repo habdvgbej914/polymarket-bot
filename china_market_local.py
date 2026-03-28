@@ -75,6 +75,11 @@ message = f"""📊 *A股每日简报（本地模型版）* {now}
 ---
 _数据来源：Finnhub | 分析：Qwen2.5-7B（本地）_"""
 
+print("\n🤖 正在用本地DeepSeek分析...")
+analysis_deepseek = analyze_with_local_model(news, model="deepseek-r1:7b")
+print("\nDeepSeek分析结果：")
+print(analysis_deepseek)
+
 print(message)
 send_telegram(message)
 print("\n✅ 已发送到Telegram")
