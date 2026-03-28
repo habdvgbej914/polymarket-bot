@@ -387,6 +387,82 @@ def update_market_sentiment(sentiment: str) -> str:
   中性(Neutral)：{posterior['neutral']*100:.1f}%"""
 
 @app.tool()
+def analyze_with_local_model(news_text: str, model: str = "qwen2.5:7b") -> str:
+    """
+    用本地模型分析市场新闻
+    model参数：qwen2.5:7b 或 deepseek-r1:7b
+    """
+    import ollama
+    
+    prompt = f"""你是一个A股市场分析师。以下是今日相关财经新闻：
+
+{news_text}
+
+请完成以下分析：
+1. 整体市场情绪：看多/看空/中性
+2. 最值得关注的1-2条新闻及原因
+3. 对A股短期影响的简要判断
+
+用简洁的中文回答，总字数不超过300字。"""
+
+    response = ollama.chat(
+        model=model,
+        messages=[{"role": "user", "content": prompt}]
+    )
+    
+    return f"""
+【{model}本地分析结果】
+
+{response['message']['content']}
+"""
+
+@app.tool()
+def compare_models() -> str:
+    """
+    同时用Qwen和DeepSeek分析当前市场新闻，输出对比结果
+    """
+    import ollama
+    
+    news_list = get_china_news()
+    if not news_list:
+        return "今日暂无相关新闻"
+    
+    news_text = ""
+    for i, n in enumerate(news_list):
+        news_text += f"{i+1}. {n['headline']}\n{n['summary']}\n\n"
+    
+    prompt = f"""你是一个A股市场分析师。以下是今日相关财经新闻：
+
+{news_text}
+
+请完成以下分析：
+1. 整体市场情绪：看多/看空/中性
+2. 最值得关注的新闻
+3. 对A股短期影响
+
+用简洁中文回答，不超过200字。"""
+
+    qwen_response = ollama.chat(
+        model="qwen2.5:7b",
+        messages=[{"role": "user", "content": prompt}]
+    )
+    
+    deepseek_response = ollama.chat(
+        model="deepseek-r1:7b",
+        messages=[{"role": "user", "content": prompt}]
+    )
+    
+    return f"""
+📊 模型对比分析
+
+🔵 Qwen2.5-7B：
+{qwen_response['message']['content']}
+
+🔴 DeepSeek-R1-7B：
+{deepseek_response['message']['content']}
+"""
+
+@app.tool()
 def send_telegram(message: str) -> str:
     """发送消息到Telegram"""
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
